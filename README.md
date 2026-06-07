@@ -11,6 +11,7 @@
 Ambas máquinas virtuales corren sobre VMware y están conectadas 
 en la misma red NAT (192.168.124.0/24), lo que permite la 
 comunicación directa entre ellas.
+
 <img width="718" height="417" alt="image" src="https://github.com/user-attachments/assets/343a9d12-4cae-47ff-87f7-1660578c6929" />
 <img width="803" height="425" alt="image" src="https://github.com/user-attachments/assets/e47e2ca1-8bdd-45d5-91a7-5ce229aea962" />
 
