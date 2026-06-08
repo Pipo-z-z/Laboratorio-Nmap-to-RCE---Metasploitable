@@ -1,7 +1,5 @@
 # Laboratorio-Nmap-to-RCE---Metasploitable
 
-## Introducción
-
 Este laboratorio tiene como objetivo aplicar técnicas y herramientas
 de reconocimiento, escaneo y explotación sobre una máquina virtual
 vulnerable (Metasploitable 2), simulando el flujo de trabajo de un
