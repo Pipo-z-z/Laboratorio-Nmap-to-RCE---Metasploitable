@@ -1,6 +1,69 @@
 # Laboratorio-Nmap-to-RCE---Metasploitable
 
 ## Introducción
+
+Este laboratorio tiene como objetivo aplicar técnicas y herramientas
+de reconocimiento, escaneo y explotación sobre una máquina virtual
+vulnerable (Metasploitable 2), simulando el flujo de trabajo de un
+pentest real en un entorno controlado.
+
+Metasploitable 2 es una máquina virtual Linux desarrollada por
+Rapid7 intencionalmente vulnerable, diseñada para practicar
+técnicas de seguridad ofensiva de forma legal y ética. Expone
+deliberadamente una gran cantidad de servicios con versiones
+antiguas y configuraciones inseguras.
+
+El laboratorio sigue la metodología estándar de un pentest:
+
+```
+Reconocimiento → Escaneo → Identificación de vulnerabilidades
+      → Explotación → Post-explotación
+```
+
+### Objetivos
+
+- Identificar hosts activos en la red usando herramientas de
+  reconocimiento activo
+- Mapear puertos, servicios y versiones del objetivo con Nmap
+- Detectar vulnerabilidades conocidas usando NSE y Searchsploit
+- Explotar la vulnerabilidad CVE-2004-2687 (distcc) para obtener
+  ejecución remota de código (RCE)
+- Obtener una reverse shell interactiva en la máquina víctima
+- Explotar la vulnerabilidad CVE-2011-2523 (vsFTPd 2.3.4 backdoor)
+  para obtener acceso root completo
+
+### Herramientas utilizadas
+
+| Herramienta | Propósito |
+|-------------|-----------|
+| Nmap / Zenmap | Escaneo de puertos, versiones y vulnerabilidades |
+| NSE (Nmap Scripting Engine) | Scripts de detección y explotación |
+| Searchsploit | Búsqueda de exploits en base de datos local |
+| Netcat (nc) | Listener para reverse shell |
+| vsFtpdBackdoor.py | Exploit para CVE-2011-2523 |
+| Python (pty) | Upgrade de shell básica a interactiva |
+
+### Advertencia legal y ética
+
+> ⚠️ Todas las técnicas demostradas en este laboratorio se
+> realizaron en un entorno completamente controlado y aislado,
+> sobre una máquina virtual diseñada específicamente para este
+> propósito. El uso de estas técnicas sobre sistemas sin
+> autorización explícita es ilegal y va en contra de la ética
+> profesional en ciberseguridad. Este documento tiene fines
+> exclusivamente educativos.
+
+### Estructura del informe
+
+- [Entorno de laboratorio](#entorno-de-laboratorio)
+- [Fase 1: Reconocimiento de red](#fase-1-reconocimiento-de-red)
+- [Fase 2: Escaneo con Nmap / Zenmap](#fase-2-escaneo-con-nmap--zenmap)
+- [Fase 3: Identificación de vulnerabilidades](#fase-3-identificación-de-vulnerabilidades-nse-y-searchsploit)
+- [Fase 4: Explotación - distcc CVE-2004-2687](#fase-4-explotación---distcc-cve-2004-2687)
+- [Fase 5: Reverse Shell](#fase-5-reverse-shell)
+- [Fase 6: Explotación - vsFTPd 2.3.4 CVE-2011-2523](#fase-6-explotación---vsftpd-234-cve-2011-2523)
+- [Conclusiones y lecciones aprendidas](#conclusiones-y-lecciones-aprendidas)
+
 ## Entorno de laboratorio
 
 | Rol | Sistema operativo | IP |
