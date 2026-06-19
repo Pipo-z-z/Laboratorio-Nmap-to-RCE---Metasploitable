@@ -41,16 +41,6 @@ Reconocimiento → Escaneo → Identificación de vulnerabilidades
 | vsFtpdBackdoor.py | Exploit para CVE-2011-2523 |
 | Python (pty) | Upgrade de shell básica a interactiva |
 
-### Advertencia legal y ética
-
-> ⚠️ Todas las técnicas demostradas en este laboratorio se
-> realizaron en un entorno completamente controlado y aislado,
-> sobre una máquina virtual diseñada específicamente para este
-> propósito. El uso de estas técnicas sobre sistemas sin
-> autorización explícita es ilegal y va en contra de la ética
-> profesional en ciberseguridad. Este documento tiene fines
-> exclusivamente educativos.
-
 ### Estructura del informe
 
 - [Entorno de laboratorio](#entorno-de-laboratorio)
